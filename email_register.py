@@ -48,6 +48,14 @@ TEMP_MAIL_SITE_PASSWORD = str(_conf.get("temp_mail_site_password", ""))
 PROXY = str(_conf.get("proxy", ""))
 TEMP_MAIL_PROVIDER = str(_conf.get("temp_mail_provider") or "").strip().lower()
 
+# LuckMail 专属配置
+# temp_mail_api_base = "https://mails.luckyous.com"
+# temp_mail_provider = "luckmail"
+# temp_mail_admin_password = "<your_luckmail_api_key>"  (X-API-Key)
+# temp_mail_domain = "twitter" 或留空（使用项目列表第一个）
+
+LUCKMAIL_API_BASE = "https://mails.luckyous.com"
+
 # ============================================================
 # 适配层：为 DrissionPage_example.py 提供简单接口
 # ============================================================
@@ -87,16 +95,24 @@ def get_oai_code(dev_token: str, email: str, timeout: int = 30) -> Optional[str]
 
 
 def _detect_mail_provider(api_base: str) -> str:
+    """检测邮件提供商类型。"""
+    if TEMP_MAIL_PROVIDER == "luckmail":
+        return "luckmail"
     if TEMP_MAIL_PROVIDER in {"duckmail", "temp-mail", "temp_mail", "generic"}:
         return "duckmail" if TEMP_MAIL_PROVIDER == "duckmail" else "generic"
     hostname = (urlparse(api_base).hostname or "").lower()
+    if "luckmail" in hostname or "luckyous" in hostname or "mails.luckyous" in hostname:
+        return "luckmail"
     if "duckmail" in hostname:
         return "duckmail"
     return "generic"
 
 
 def _provider_label() -> str:
-    return "DuckMail" if _detect_mail_provider(TEMP_MAIL_API_BASE) == "duckmail" else "Temp Mail"
+    provider = _detect_mail_provider(TEMP_MAIL_API_BASE)
+    if provider == "luckmail":
+        return "LuckMail"
+    return "DuckMail" if provider == "duckmail" else "Temp Mail"
 
 def _create_session():
     """创建请求会话（优先 curl_cffi）。"""
@@ -278,12 +294,288 @@ def _create_duckmail_email() -> Tuple[str, str, str]:
     raise Exception(f"创建 DuckMail 邮箱失败，重试后仍冲突: {last_error}")
 
 
+# ============================================================
+# LuckMail 适配
+# API 文档: https://mails.luckyous.com/user/api-doc
+#
+# 工作流程：
+#   1. 调用 POST /api/v1/openapi/email/purchase 购买邮箱
+#      → 返回 email_address + token
+#   2. 将 token 当作 mail_token 传给调用方
+#   3. 轮询 GET /api/v1/openapi/email/token/{token}/code
+#      → 返回验证码（无需 API Key，token 本身即鉴权凭证）
+#
+# 配置项：
+#   temp_mail_api_base    = "https://mails.luckyous.com"  （可省略，自动使用默认值）
+#   temp_mail_provider    = "luckmail"
+#   temp_mail_admin_password = "<your_luckmail_api_key>"   (X-API-Key)
+#   temp_mail_domain      = "xai"  （LuckMail 项目编码，如留空则自动取第一个可用项目）
+# ============================================================
+
+LUCKMAIL_PROJECT_CODE_FOR_XAI = "xai"  # x.ai / Grok 注册对应的项目编码
+
+
+def _luckmail_api_key() -> str:
+    """获取 LuckMail API Key。"""
+    return TEMP_MAIL_ADMIN_PASSWORD.strip()
+
+
+def _luckmail_headers() -> Dict[str, str]:
+    """构建 LuckMail 请求头（X-API-Key 鉴权）。"""
+    return {
+        "X-API-Key": _luckmail_api_key(),
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _luckmail_resolve_project_code(session, use_cffi) -> str:
+    """解析项目编码，优先用配置中的 temp_mail_domain，否则从项目列表选第一个。"""
+    # temp_mail_domain 在 LuckMail 中复用为项目编码
+    if TEMP_MAIL_DOMAIN:
+        return TEMP_MAIL_DOMAIN.strip()
+
+    api_base = LUCKMAIL_API_BASE.rstrip("/")
+    res = _do_request(
+        session,
+        use_cffi,
+        "get",
+        f"{api_base}/api/v1/openapi/projects",
+        headers=_luckmail_headers(),
+        params={"page": 1, "page_size": 20},
+        timeout=20,
+    )
+    if res.status_code != 200:
+        raise Exception(f"获取 LuckMail 项目列表失败: {res.status_code} - {res.text[:200]}")
+
+    data = res.json()
+    if data.get("code") != 0:
+        raise Exception(f"获取 LuckMail 项目列表错误: {data.get('message')}")
+
+    projects = (data.get("data") or {}).get("list") or data.get("data") or []
+    if not isinstance(projects, list) or not projects:
+        raise Exception("LuckMail 项目列表为空，请在配置里设置 temp_mail_domain 为项目编码（如 xai）")
+
+    # 优先找 xai 项目
+    for p in projects:
+        if isinstance(p, dict):
+            code = str(p.get("code") or p.get("project_code") or "").lower()
+            if code in ("xai", "grok"):
+                print(f"[*] LuckMail 自动选择项目: {code}")
+                return code
+
+    # 退而求其次取第一个
+    first = projects[0]
+    if isinstance(first, dict):
+        code = str(first.get("code") or first.get("project_code") or "")
+        if code:
+            print(f"[*] LuckMail 使用第一个可用项目: {code}")
+            return code
+
+    raise Exception("LuckMail 项目列表中没有可用项目编码")
+
+
+def _create_luckmail_email() -> Tuple[str, str, str]:
+    """
+    通过 LuckMail 接码平台购买一个邮箱。
+
+    Returns:
+        (email_address, "", token)
+        其中 token 用于后续通过 /api/v1/openapi/email/token/{token}/code 查询验证码
+    """
+    api_key = _luckmail_api_key()
+    if not api_key:
+        raise Exception(
+            "LuckMail API Key 未配置，请在 config.json 中设置 temp_mail_admin_password 为你的 LuckMail X-API-Key"
+        )
+
+    api_base = LUCKMAIL_API_BASE.rstrip("/")
+    session, use_cffi = _create_session()
+
+    project_code = _luckmail_resolve_project_code(session, use_cffi)
+
+    body: Dict[str, Any] = {
+        "project_code": project_code,
+        "quantity": 1,
+    }
+
+    res = _do_request(
+        session,
+        use_cffi,
+        "post",
+        f"{api_base}/api/v1/openapi/email/purchase",
+        json=body,
+        headers=_luckmail_headers(),
+        timeout=30,
+    )
+
+    if res.status_code != 200:
+        raise Exception(f"LuckMail 购买邮箱失败: {res.status_code} - {res.text[:300]}")
+
+    data = res.json()
+    # LuckMail API 有两种返回格式：
+    # 1. 标准包装: {"code": 0, "data": {"purchases": [...]}}
+    # 2. 直接返回: {"purchases": [...], "total_cost": ...}
+    if "code" in data:
+        if data.get("code") != 0:
+            raise Exception(f"LuckMail 购买邮箱错误: {data.get('message')} (code={data.get('code')})")
+        result = data.get("data") or {}
+        purchases = result.get("purchases") if isinstance(result, dict) else result
+        if not purchases and isinstance(result, dict):
+            purchases = [result]
+    else:
+        # 直接返回格式，顶层就是结果
+        purchases = data.get("purchases") or []
+        if not purchases and data.get("email_address"):
+            purchases = [data]
+
+    if not purchases:
+        raise Exception(f"LuckMail 购买邮箱返回数据异常: {data}")
+
+    item = purchases[0] if isinstance(purchases, list) else purchases
+    email_address = str(item.get("email_address") or "")
+    token = str(item.get("token") or "")
+
+    if not email_address or not token:
+        raise Exception(f"LuckMail 返回数据缺少 email_address 或 token: {item}")
+
+    print(f"[*] LuckMail 邮箱购买成功: {email_address} (项目: {project_code})")
+    return email_address, "", token
+
+
+def _fetch_luckmail_code(mail_token: str) -> Optional[str]:
+    """
+    通过 LuckMail token 查询最新验证码。
+    接口：GET /api/v1/openapi/email/token/{token}/code
+    该接口无需 X-API-Key，token 本身即凭证。
+
+    Returns:
+        验证码字符串，或 None（暂无新邮件时）
+    """
+    api_base = LUCKMAIL_API_BASE.rstrip("/")
+    session, use_cffi = _create_session()
+
+    res = _do_request(
+        session,
+        use_cffi,
+        "get",
+        f"{api_base}/api/v1/openapi/email/token/{mail_token}/code",
+        headers={"Accept": "application/json"},
+        timeout=20,
+    )
+
+    if res.status_code != 200:
+        return None
+
+    data = res.json()
+    if data.get("code") != 0:
+        return None
+
+    result = data.get("data") or {}
+    has_new_mail = result.get("has_new_mail", False)
+    if not has_new_mail:
+        return None
+
+    verification_code = result.get("verification_code")
+    if verification_code:
+        return str(verification_code)
+
+    # 尝试从邮件正文中提取
+    mail = result.get("mail") or {}
+    body_text = mail.get("body_text") or ""
+    body_html = mail.get("body_html") or ""
+    subject = mail.get("subject") or ""
+    content = f"{subject}\n{body_text}\n{body_html}"
+    return extract_verification_code(content)
+
+
+def _fetch_luckmail_emails(mail_token: str) -> List[Dict[str, Any]]:
+    """
+    通过 LuckMail token 获取邮件列表。
+    接口：GET /api/v1/openapi/email/token/{token}/mails
+    """
+    api_base = LUCKMAIL_API_BASE.rstrip("/")
+    session, use_cffi = _create_session()
+
+    res = _do_request(
+        session,
+        use_cffi,
+        "get",
+        f"{api_base}/api/v1/openapi/email/token/{mail_token}/mails",
+        headers={"Accept": "application/json"},
+        timeout=20,
+    )
+
+    if res.status_code != 200:
+        return []
+
+    data = res.json()
+    if data.get("code") != 0:
+        return []
+
+    result = data.get("data") or {}
+    return result.get("mails") or []
+
+
+def _fetch_luckmail_mail_detail(mail_token: str, message_id: str) -> Optional[Dict[str, Any]]:
+    """
+    通过 LuckMail token 获取邮件详情。
+    接口：GET /api/v1/openapi/email/token/{token}/mails/{message_id}
+    """
+    api_base = LUCKMAIL_API_BASE.rstrip("/")
+    session, use_cffi = _create_session()
+
+    res = _do_request(
+        session,
+        use_cffi,
+        "get",
+        f"{api_base}/api/v1/openapi/email/token/{mail_token}/mails/{message_id}",
+        headers={"Accept": "application/json"},
+        timeout=20,
+    )
+
+    if res.status_code != 200:
+        return None
+
+    data = res.json()
+    if data.get("code") != 0:
+        return None
+
+    return data.get("data")
+
+
+def _wait_for_luckmail_code(mail_token: str, timeout: int = 120) -> Optional[str]:
+    """
+    轮询 LuckMail token 接口等待验证码。
+    优先使用 /token/{token}/code 接口（直接返回验证码）。
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        code = _fetch_luckmail_code(mail_token)
+        if code:
+            print(f"[*] LuckMail 提取到验证码: {code}")
+            return code
+        time.sleep(3)
+    return None
+
+
+# ============================================================
+# 通用接口
+# ============================================================
+
 def create_temp_email() -> Tuple[str, str, str]:
     """创建临时邮箱地址，返回 (email, password, mail_token)。"""
-    if not TEMP_MAIL_API_BASE:
+    if not TEMP_MAIL_API_BASE and TEMP_MAIL_PROVIDER != "luckmail":
         raise Exception("temp_mail_api_base 未设置，无法创建临时邮箱")
 
     provider = _detect_mail_provider(TEMP_MAIL_API_BASE)
+
+    if provider == "luckmail":
+        try:
+            return _create_luckmail_email()
+        except Exception as e:
+            raise Exception(f"LuckMail 邮箱创建失败: {e}")
+
     if provider == "duckmail":
         try:
             return _create_duckmail_email()
@@ -353,7 +645,15 @@ def _fetch_duckmail_emails(mail_token: str) -> List[Dict[str, Any]]:
 
 def fetch_emails(mail_token: str) -> List[Dict[str, Any]]:
     """获取邮件列表。"""
-    if _detect_mail_provider(TEMP_MAIL_API_BASE) == "duckmail":
+    provider = _detect_mail_provider(TEMP_MAIL_API_BASE)
+
+    if provider == "luckmail":
+        try:
+            return _fetch_luckmail_emails(mail_token)
+        except Exception:
+            return []
+
+    if provider == "duckmail":
         try:
             return _fetch_duckmail_emails(mail_token)
         except Exception:
@@ -429,7 +729,15 @@ def _fetch_duckmail_email_detail(mail_token: str, msg_id: str) -> Optional[Dict[
 
 def fetch_email_detail(mail_token: str, msg_id: str) -> Optional[Dict[str, Any]]:
     """获取单封邮件详情。"""
-    if _detect_mail_provider(TEMP_MAIL_API_BASE) == "duckmail":
+    provider = _detect_mail_provider(TEMP_MAIL_API_BASE)
+
+    if provider == "luckmail":
+        try:
+            return _fetch_luckmail_mail_detail(mail_token, msg_id)
+        except Exception:
+            return None
+
+    if provider == "duckmail":
         try:
             return _fetch_duckmail_email_detail(mail_token, msg_id)
         except Exception:
@@ -458,6 +766,13 @@ def fetch_email_detail(mail_token: str, msg_id: str) -> Optional[Dict[str, Any]]
 
 def wait_for_verification_code(mail_token: str, timeout: int = 120) -> Optional[str]:
     """轮询临时邮箱，等待验证码邮件。"""
+    provider = _detect_mail_provider(TEMP_MAIL_API_BASE)
+
+    # LuckMail 有专用的验证码直查接口，优先使用
+    if provider == "luckmail":
+        return _wait_for_luckmail_code(mail_token, timeout=timeout)
+
+    # 其他提供商走通用轮询逻辑
     start = time.time()
     seen_ids = set()
 
@@ -503,9 +818,14 @@ def _extract_mail_content(detail: Dict[str, Any]) -> str:
         detail.get("html"),
         detail.get("raw"),
         detail.get("source"),
+        # LuckMail 字段兼容
+        detail.get("body_text"),
+        detail.get("body_html"),
+        detail.get("body"),
+        detail.get("html_body"),
     ]
     direct_content = "\n".join(_stringify_mail_part(part) for part in direct_parts if part)
-    if detail.get("text") or detail.get("html"):
+    if detail.get("text") or detail.get("html") or detail.get("body_text"):
         return direct_content
 
     raw = detail.get("raw") or detail.get("source")

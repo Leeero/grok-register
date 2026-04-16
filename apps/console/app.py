@@ -248,6 +248,9 @@ def run_health_checks() -> dict[str, Any]:
     api_conf = dict(defaults.get("api") or {})
     api_endpoint = str(api_conf.get("endpoint", "") or "").strip()
     temp_mail_api_base = str(defaults.get("temp_mail_api_base", "") or "").strip()
+    temp_mail_provider = str(defaults.get("temp_mail_provider", "") or "").strip()
+    if not temp_mail_api_base and temp_mail_provider == "luckmail":
+        temp_mail_api_base = "https://mails.luckyous.com"
 
     warp_target = browser_proxy or request_proxy
     if not warp_target:
@@ -421,6 +424,7 @@ class TaskCreate(BaseModel):
     count: int = Field(50, ge=1, le=5000)
     proxy: str | None = None
     browser_proxy: str | None = None
+    temp_mail_provider: str | None = None
     temp_mail_api_base: str | None = None
     temp_mail_admin_password: str | None = None
     temp_mail_domain: str | None = None
@@ -434,6 +438,7 @@ class TaskCreate(BaseModel):
 class SystemSettings(BaseModel):
     proxy: str = ""
     browser_proxy: str = ""
+    temp_mail_provider: str = ""
     temp_mail_api_base: str = ""
     temp_mail_admin_password: str = ""
     temp_mail_domain: str = ""
@@ -481,7 +486,7 @@ def merged_defaults() -> dict[str, Any]:
         base["proxy"] = str(saved.get("proxy", ""))
     if saved.get("browser_proxy") is not None:
         base["browser_proxy"] = str(saved.get("browser_proxy", ""))
-    for key in ("temp_mail_api_base", "temp_mail_admin_password", "temp_mail_domain", "temp_mail_site_password"):
+    for key in ("temp_mail_provider", "temp_mail_api_base", "temp_mail_admin_password", "temp_mail_domain", "temp_mail_site_password"):
         if key in saved:
             base[key] = str(saved.get(key, ""))
     api_base = dict(base.get("api") or {})
@@ -502,6 +507,7 @@ def build_task_config(payload: TaskCreate) -> dict[str, Any]:
         "run": {"count": int(payload.count)},
         "proxy": defaults.get("proxy", "") if payload.proxy is None else payload.proxy.strip(),
         "browser_proxy": defaults.get("browser_proxy", "") if payload.browser_proxy is None else payload.browser_proxy.strip(),
+        "temp_mail_provider": defaults.get("temp_mail_provider", "") if payload.temp_mail_provider is None else payload.temp_mail_provider.strip(),
         "temp_mail_api_base": defaults.get("temp_mail_api_base", "") if payload.temp_mail_api_base is None else payload.temp_mail_api_base.strip(),
         "temp_mail_admin_password": defaults.get("temp_mail_admin_password", "") if payload.temp_mail_admin_password is None else payload.temp_mail_admin_password.strip(),
         "temp_mail_domain": defaults.get("temp_mail_domain", "") if payload.temp_mail_domain is None else payload.temp_mail_domain.strip(),

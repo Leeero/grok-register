@@ -2,9 +2,10 @@
     "run": {
         "count": 50
     },
-    "temp_mail_api_base": "https://mail-api.example.com",
-    "temp_mail_admin_password": "<your_admin_password>",
-    "temp_mail_domain": "mail.example.com",
+    "temp_mail_provider": "luckmail",
+    "temp_mail_api_base": "https://mails.luckyous.com",
+    "temp_mail_admin_password": "<your_luckmail_api_key>",
+    "temp_mail_domain": "xai",
     "temp_mail_site_password": "",
     "proxy": "",
     "browser_proxy": "",

@@ -20,6 +20,7 @@
   const toggleAdvancedBtnEl = document.getElementById("toggleAdvancedBtn");
   const toggleMailBtnEl = document.getElementById("toggleMailBtn");
   const advancedFieldsEl = document.getElementById("advancedFields");
+  const settingsProviderSelectEl = document.getElementById("settingsProviderSelect");
   const healthGridEl = document.getElementById("healthGrid");
   const healthMetaEl = document.getElementById("healthMeta");
 
@@ -36,6 +37,7 @@
     formEl.elements.count.value = defaults.run?.count || 50;
     settingsFormEl.elements.proxy.value = defaults.proxy || "";
     settingsFormEl.elements.browser_proxy.value = defaults.browser_proxy || "";
+    settingsFormEl.elements.temp_mail_provider.value = defaults.temp_mail_provider || "";
     settingsFormEl.elements.temp_mail_api_base.value = defaults.temp_mail_api_base || "";
     settingsFormEl.elements.temp_mail_admin_password.value = defaults.temp_mail_admin_password || "";
     settingsFormEl.elements.temp_mail_domain.value = defaults.temp_mail_domain || "";
@@ -44,6 +46,16 @@
     settingsFormEl.elements.api_token.value = defaults.api?.token || "";
     settingsFormEl.elements.api_append.checked = defaults.api?.append !== false;
     formEl.elements.api_append.checked = false;
+    // 初始化 provider 联动提示
+    updateProviderHints(settingsFormEl.elements.temp_mail_provider.value);
+  }
+
+  function updateProviderHints(provider) {
+    const luckmailHint = document.getElementById("luckmailHint");
+    const duckmailHint = document.getElementById("duckmailHint");
+    if (!luckmailHint || !duckmailHint) return;
+    luckmailHint.classList.toggle("hidden", provider !== "luckmail");
+    duckmailHint.classList.toggle("hidden", provider !== "duckmail");
   }
 
   function statusClass(status) {
@@ -146,6 +158,7 @@
 
     const cfg = task.config || {};
     detailMetaEl.innerHTML = [
+      ["邮件提供商", cfg.temp_mail_provider || "-"],
       ["邮箱 API Base", cfg.temp_mail_api_base || "-"],
       ["邮箱域名", cfg.temp_mail_domain || "-"],
       ["邮箱管理密码", cfg.temp_mail_admin_password || "-"],
@@ -223,6 +236,7 @@
       count: Number(formEl.elements.count.value),
       proxy: formEl.elements.proxy.value.trim() || null,
       browser_proxy: formEl.elements.browser_proxy.value.trim() || null,
+      temp_mail_provider: formEl.elements.temp_mail_provider.value.trim() || null,
       temp_mail_api_base: formEl.elements.temp_mail_api_base.value.trim() || null,
       temp_mail_admin_password: formEl.elements.temp_mail_admin_password.value.trim() || null,
       temp_mail_domain: formEl.elements.temp_mail_domain.value.trim() || null,
@@ -268,6 +282,7 @@
     const payload = {
       proxy: settingsFormEl.elements.proxy.value.trim(),
       browser_proxy: settingsFormEl.elements.browser_proxy.value.trim(),
+      temp_mail_provider: settingsFormEl.elements.temp_mail_provider.value.trim(),
       temp_mail_api_base: settingsFormEl.elements.temp_mail_api_base.value.trim(),
       temp_mail_admin_password: settingsFormEl.elements.temp_mail_admin_password.value.trim(),
       temp_mail_domain: settingsFormEl.elements.temp_mail_domain.value.trim(),
@@ -311,6 +326,13 @@
   setDefaults();
   refreshHealth();
   refreshAll();
+
+  // 邮件提供商选择器联动
+  if (settingsProviderSelectEl) {
+    settingsProviderSelectEl.addEventListener("change", () => {
+      updateProviderHints(settingsProviderSelectEl.value);
+    });
+  }
   window.setInterval(refreshAll, 2000);
   window.setInterval(refreshHealth, 15000);
 })();
