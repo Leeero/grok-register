@@ -32,14 +32,16 @@ if _config_path.exists():
     with _config_path.open("r", encoding="utf-8") as _f:
         _conf = json.load(_f)
 
-TEMP_MAIL_API_BASE = str(
+_temp_mail_provider_raw = str(_conf.get("temp_mail_provider") or "").strip().lower()
+_temp_mail_api_base_raw = str(
     _conf.get("temp_mail_api_base")
     or _conf.get("duckmail_api_base")
     or ""
 )
 # 自动补全 scheme，防止用户填写时漏写 https://
-if TEMP_MAIL_API_BASE and not TEMP_MAIL_API_BASE.startswith(("http://", "https://")):
-    TEMP_MAIL_API_BASE = "https://" + TEMP_MAIL_API_BASE
+if _temp_mail_api_base_raw and not _temp_mail_api_base_raw.startswith(("http://", "https://")):
+    _temp_mail_api_base_raw = "https://" + _temp_mail_api_base_raw
+
 TEMP_MAIL_ADMIN_PASSWORD = str(
     _conf.get("temp_mail_admin_password")
     or _conf.get("duckmail_api_key")
@@ -49,7 +51,22 @@ TEMP_MAIL_ADMIN_PASSWORD = str(
 TEMP_MAIL_DOMAIN = str(_conf.get("temp_mail_domain") or _conf.get("duckmail_domain") or "")
 TEMP_MAIL_SITE_PASSWORD = str(_conf.get("temp_mail_site_password", ""))
 PROXY = str(_conf.get("proxy", ""))
-TEMP_MAIL_PROVIDER = str(_conf.get("temp_mail_provider") or "").strip().lower()
+TEMP_MAIL_PROVIDER = _temp_mail_provider_raw
+
+# DuckMail 特殊处理：
+# - API 地址固定为官方 https://api.duckmail.sbs，不受 temp_mail_api_base 影响
+# - temp_mail_api_base 填写的是私有邮件域名（如 mail.lisi.cc.cd），用于 TEMP_MAIL_DOMAIN
+if TEMP_MAIL_PROVIDER == "duckmail":
+    TEMP_MAIL_API_BASE = "https://api.duckmail.sbs"
+    # 若用户在 api_base 填写了私有域名且未显式设置 domain，则将其作为 domain
+    if not TEMP_MAIL_DOMAIN and _temp_mail_api_base_raw:
+        import urllib.parse as _urlparse
+        _host = _urlparse.urlparse(_temp_mail_api_base_raw).hostname or ""
+        # 判断是否是邮件域名（非 duckmail.sbs 官方API域名）
+        if _host and "duckmail.sbs" not in _host:
+            TEMP_MAIL_DOMAIN = _host
+else:
+    TEMP_MAIL_API_BASE = _temp_mail_api_base_raw
 
 # LuckMail 专属配置
 # temp_mail_api_base = "https://mails.luckyous.com"
