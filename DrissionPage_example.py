@@ -1078,6 +1078,7 @@ def enable_nsfw_for_token(sso_token: str) -> bool:
     # 返回 True 表示成功，False 表示失败（失败不阻断主流程）。
     import json
     import urllib3
+    import requests as _req
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
@@ -1105,7 +1106,7 @@ def enable_nsfw_for_token(sso_token: str) -> bool:
     }
 
     try:
-        resp = requests.post(
+        resp = _req.post(
             nsfw_endpoint,
             json={"token": sso_token},
             headers=headers,
