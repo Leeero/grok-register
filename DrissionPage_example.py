@@ -1072,6 +1072,67 @@ def append_sso_to_txt(sso_value, output_path=DEFAULT_SSO_FILE):
     print(f"[*] 已追加写入 sso 到文件: {output_path}")
 
 
+
+def enable_nsfw_for_token(sso_token: str) -> bool:
+    # 调用 grok2api 的 NSFW 开启接口，对单个 token 开启 NSFW 模式。
+    # 返回 True 表示成功，False 表示失败（失败不阻断主流程）。
+    import json
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    config_path = os.path.join(os.path.dirname(__file__), "config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            conf = json.load(f)
+    except Exception:
+        conf = {}
+
+    api_conf = conf.get("api", {})
+    endpoint = str(api_conf.get("endpoint", "")).strip()
+    api_token = str(api_conf.get("token", "")).strip()
+
+    if not endpoint or not api_token:
+        print("[Warn] 未配置 api.endpoint 或 api.token，跳过 NSFW 开启")
+        return False
+
+    # 将 token sink 路径替换为 nsfw enable 路径
+    # endpoint 通常为 http://grok2api:8000/v1/admin/tokens
+    nsfw_endpoint = endpoint.rstrip("/").rsplit("/tokens", 1)[0] + "/tokens/nsfw/enable"
+
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = requests.post(
+            nsfw_endpoint,
+            json={"token": sso_token},
+            headers=headers,
+            timeout=120,
+            verify=False,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            summary = data.get("summary", {})
+            ok = summary.get("ok", 0)
+            if ok > 0:
+                print(f"[*] NSFW 模式已开启（token: {sso_token[:12]}...）")
+                return True
+            else:
+                results = data.get("results", {})
+                first_result = next(iter(results.values()), {})
+                err = first_result.get("error", "未知错误")
+                print(f"[Warn] NSFW 开启失败: {err}")
+                return False
+        else:
+            print(f"[Warn] NSFW 接口返回异常: HTTP {resp.status_code} {resp.text[:200]}")
+            return False
+    except Exception as e:
+        print(f"[Warn] NSFW 开启请求失败: {e}")
+        return False
+
+
 def push_sso_to_api(new_tokens: list):
     # 推送 SSO token 到 grok2api 管理接口。
     # append=false：直接将本次 token 列表全量推送（覆盖）。
@@ -1160,12 +1221,16 @@ def run_single_registration(output_path=DEFAULT_SSO_FILE, extract_numbers=False)
     sso_value = wait_for_sso_cookie()
     append_sso_to_txt(sso_value, output_path)
 
+    # 注册成功后立即尝试开启 NSFW 模式，失败不影响主流程
+    nsfw_ok = enable_nsfw_for_token(sso_value)
+
     if extract_numbers:
         extract_visible_numbers()
 
     result = {
         "email": email,
         "sso": sso_value,
+        "nsfw": nsfw_ok,
         **profile,
     }
 
@@ -1224,7 +1289,12 @@ def main():
 
             try:
                 result = run_single_registration(args.output, extract_numbers=args.extract_numbers)
-                collected_sso.append(result["sso"])
+                # 只有 NSFW 开启成功的 token 才入池（保证池中 token 均为 NSFW 可用状态）
+                if result.get("nsfw"):
+                    collected_sso.append(result["sso"])
+                    print(f"[*] token 已标记待入池（NSFW 已开启）")
+                else:
+                    print(f"[Warn] NSFW 开启失败，本轮 token 不入池: {result['email']}")
                 round_succeeded = True
             except KeyboardInterrupt:
                 print("\n[Info] 收到中断信号，停止后续轮次。")
