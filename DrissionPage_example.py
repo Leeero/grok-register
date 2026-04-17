@@ -9,6 +9,7 @@ import time
 import os
 import secrets
 import sys
+import signal
 
 from email_register import get_email_and_token, get_oai_code
 
@@ -1288,7 +1289,15 @@ def main():
             print(f"\n[*] 开始第 {current_round} 轮注册")
             round_succeeded = False
 
+            # 单轮超时保护：超过 ROUND_TIMEOUT 秒自动中断，归为失败继续下一轮
+            ROUND_TIMEOUT = 300  # 5 分钟
+
+            def _timeout_handler(signum, frame):
+                raise TimeoutError("Round timeout: this round exceeded %d seconds, skipping" % ROUND_TIMEOUT)
+
             try:
+                signal.signal(signal.SIGALRM, _timeout_handler)
+                signal.alarm(ROUND_TIMEOUT)
                 result = run_single_registration(args.output, extract_numbers=args.extract_numbers)
                 # 只有 NSFW 开启成功的 token 才入池（保证池中 token 均为 NSFW 可用状态）
                 if result.get("nsfw"):
@@ -1298,11 +1307,13 @@ def main():
                     print(f"[Warn] NSFW 开启失败，本轮 token 不入池: {result['email']}")
                 round_succeeded = True
             except KeyboardInterrupt:
+                signal.alarm(0)
                 print("\n[Info] 收到中断信号，停止后续轮次。")
                 break
             except Exception as error:
                 print(f"[Error] 第 {current_round} 轮失败: {error}")
             finally:
+                signal.alarm(0)  # 无论成功失败，取消超时定时器
                 restart_browser()
 
             if args.count == 0 or current_round < args.count:
