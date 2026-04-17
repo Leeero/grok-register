@@ -249,8 +249,11 @@ def run_health_checks() -> dict[str, Any]:
     api_endpoint = str(api_conf.get("endpoint", "") or "").strip()
     temp_mail_api_base = str(defaults.get("temp_mail_api_base", "") or "").strip()
     temp_mail_provider = str(defaults.get("temp_mail_provider", "") or "").strip()
+    # LuckMail 和 DuckMail 均有内置默认 API base，无需强制配置
     if not temp_mail_api_base and temp_mail_provider == "luckmail":
         temp_mail_api_base = "https://mails.luckyous.com"
+    elif not temp_mail_api_base and temp_mail_provider == "duckmail":
+        temp_mail_api_base = "https://api.duckmail.sbs"
 
     warp_target = browser_proxy or request_proxy
     if not warp_target:

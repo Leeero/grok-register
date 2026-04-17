@@ -2,11 +2,25 @@
     "run": {
         "count": 50
     },
+
+    "_comment_provider": "临时邮箱提供商：luckmail 或 duckmail，推荐二选一",
+
+    "_comment_luckmail": "=== LuckMail 配置示例（https://mails.luckyous.com）===",
     "temp_mail_provider": "luckmail",
-    "temp_mail_api_base": "https://mails.luckyous.com",
-    "temp_mail_admin_password": "<your_luckmail_api_key>",
+    "temp_mail_api_base": "",
+    "temp_mail_admin_password": "<your_luckmail_x_api_key>",
     "temp_mail_domain": "xai",
     "temp_mail_site_password": "",
+
+    "_comment_duckmail": "=== DuckMail 私有域名配置示例（https://api.duckmail.sbs）===",
+    "_duckmail_example": {
+        "temp_mail_provider": "duckmail",
+        "temp_mail_api_base": "",
+        "temp_mail_admin_password": "dk_<your_duckmail_api_key>",
+        "temp_mail_domain": "<your_private_domain.com>",
+        "temp_mail_site_password": ""
+    },
+
     "proxy": "",
     "browser_proxy": "",
     "api": {

@@ -55,6 +55,7 @@ TEMP_MAIL_PROVIDER = str(_conf.get("temp_mail_provider") or "").strip().lower()
 # temp_mail_domain = "twitter" 或留空（使用项目列表第一个）
 
 LUCKMAIL_API_BASE = "https://mails.luckyous.com"
+DUCKMAIL_API_BASE = "https://api.duckmail.sbs"
 
 # ============================================================
 # 适配层：为 DrissionPage_example.py 提供简单接口
@@ -98,8 +99,10 @@ def _detect_mail_provider(api_base: str) -> str:
     """检测邮件提供商类型。"""
     if TEMP_MAIL_PROVIDER == "luckmail":
         return "luckmail"
-    if TEMP_MAIL_PROVIDER in {"duckmail", "temp-mail", "temp_mail", "generic"}:
-        return "duckmail" if TEMP_MAIL_PROVIDER == "duckmail" else "generic"
+    if TEMP_MAIL_PROVIDER == "duckmail":
+        return "duckmail"
+    if TEMP_MAIL_PROVIDER in {"temp-mail", "temp_mail", "generic"}:
+        return "generic"
     hostname = (urlparse(api_base).hostname or "").lower()
     if "luckmail" in hostname or "luckyous" in hostname or "mails.luckyous" in hostname:
         return "luckmail"
@@ -195,6 +198,7 @@ def _resolve_duckmail_domain(session, use_cffi, api_base: str) -> str:
     if TEMP_MAIL_DOMAIN:
         return TEMP_MAIL_DOMAIN
 
+    # 使用 API Key（dk_xxx）请求域名列表，会返回私有域名
     headers = _build_duckmail_headers(TEMP_MAIL_ADMIN_PASSWORD)
     res = _do_request(
         session,
@@ -216,6 +220,7 @@ def _resolve_duckmail_domain(session, use_cffi, api_base: str) -> str:
     if not isinstance(domains, list) or not domains:
         raise Exception("DuckMail 域名列表为空，请在配置里显式填写 temp_mail_domain")
 
+    private_verified: List[str] = []
     public_verified: List[str] = []
     verified: List[str] = []
     fallback: List[str] = []
@@ -228,19 +233,26 @@ def _resolve_duckmail_domain(session, use_cffi, api_base: str) -> str:
         fallback.append(domain)
         if item.get("isVerified") is True:
             verified.append(domain)
-            if item.get("isPublic") is True or item.get("ownerId") in (None, "", 0):
+            owner_id = item.get("ownerId")
+            # ownerId 非 null 说明是私有域名（用户自有），优先选用
+            if owner_id not in (None, "", 0):
+                private_verified.append(domain)
+            else:
                 public_verified.append(domain)
 
-    for candidates in (public_verified, verified, fallback):
+    # 优先私有已验证域名，其次公有已验证，再次全部已验证，最后兜底
+    for candidates in (private_verified, public_verified, verified, fallback):
         if candidates:
             return candidates[0]
     raise Exception("DuckMail 域名列表里没有可用域名，请在配置里显式填写 temp_mail_domain")
 
 
 def _create_duckmail_email() -> Tuple[str, str, str]:
-    api_base = TEMP_MAIL_API_BASE.rstrip("/")
+    # 若未配置 api_base，使用 DuckMail 官方默认地址
+    api_base = (TEMP_MAIL_API_BASE or DUCKMAIL_API_BASE).rstrip("/")
     session, use_cffi = _create_session()
     domain = _resolve_duckmail_domain(session, use_cffi, api_base)
+    # API Key (dk_xxx) 或 Bearer token 均放 Authorization 头
     create_headers = _build_duckmail_headers(TEMP_MAIL_ADMIN_PASSWORD)
     last_error = ""
 
@@ -565,10 +577,10 @@ def _wait_for_luckmail_code(mail_token: str, timeout: int = 120) -> Optional[str
 
 def create_temp_email() -> Tuple[str, str, str]:
     """创建临时邮箱地址，返回 (email, password, mail_token)。"""
-    if not TEMP_MAIL_API_BASE and TEMP_MAIL_PROVIDER != "luckmail":
-        raise Exception("temp_mail_api_base 未设置，无法创建临时邮箱")
-
     provider = _detect_mail_provider(TEMP_MAIL_API_BASE)
+    # LuckMail 和 DuckMail 都有内置默认 API base，无需强制配置
+    if not TEMP_MAIL_API_BASE and provider not in ("luckmail", "duckmail"):
+        raise Exception("temp_mail_api_base 未设置，无法创建临时邮箱")
 
     if provider == "luckmail":
         try:
@@ -623,7 +635,7 @@ def create_temp_email() -> Tuple[str, str, str]:
 
 
 def _fetch_duckmail_emails(mail_token: str) -> List[Dict[str, Any]]:
-    api_base = TEMP_MAIL_API_BASE.rstrip("/")
+    api_base = (TEMP_MAIL_API_BASE or DUCKMAIL_API_BASE).rstrip("/")
     headers = _build_duckmail_headers(mail_token)
     session, use_cffi = _create_session()
     res = _do_request(
@@ -689,7 +701,7 @@ def _normalize_message_id(msg_id: Any) -> str:
 
 
 def _fetch_duckmail_email_detail(mail_token: str, msg_id: str) -> Optional[Dict[str, Any]]:
-    api_base = TEMP_MAIL_API_BASE.rstrip("/")
+    api_base = (TEMP_MAIL_API_BASE or DUCKMAIL_API_BASE).rstrip("/")
     normalized_id = _normalize_message_id(msg_id)
     headers = _build_duckmail_headers(mail_token)
     session, use_cffi = _create_session()

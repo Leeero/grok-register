@@ -65,14 +65,14 @@
           </div>
           <div id="duckmailHint" class="provider-hint provider-hint-duckmail hidden">
             <strong>📫 DuckMail 配置说明</strong><br>
-            <b>邮箱 API Base</b>：填写 DuckMail 实例地址，如 <code>https://api.duckmail.sbs</code><br>
-            <b>邮箱管理口令</b>：DuckMail API Key（私有域名时填写），公共实例可留空<br>
-            <b>邮箱域名</b>：留空时自动从 DuckMail 实例选公开域名，也可手动指定
+            <b>邮箱 API Base</b>：留空即可（默认 <code>https://api.duckmail.sbs</code>），自建实例填实例地址<br>
+            <b>邮箱管理口令</b>：填写你的 DuckMail <code>API Key</code>（格式：<code>dk_xxx</code>，在 <a href="https://domain.duckmail.sbs" target="_blank">domain.duckmail.sbs</a> 获取）；使用私有域名时必填<br>
+            <b>邮箱域名</b>：填写你的私有域名（如 <code>example.com</code>）；留空时优先自动选取私有域名，否则选公开域名
           </div>
           <label>
             <span>邮箱 API Base</span>
-            <small id="apiBaseHint">临时邮箱服务接口地址。LuckMail 留空即可；DuckMail 填实例地址。</small>
-            <input name="temp_mail_api_base" placeholder="LuckMail 留空 / DuckMail: https://api.duckmail.sbs">
+            <small id="apiBaseHint">临时邮箱服务接口地址。LuckMail 和 DuckMail 官方实例均可留空，自建实例才需填写。</small>
+            <input name="temp_mail_api_base" placeholder="均可留空（LuckMail: mails.luckyous.com / DuckMail: api.duckmail.sbs）">
           </label>
           <label>
             <span id="domainLabel">邮箱域名 / 项目编码</span>
@@ -81,8 +81,8 @@
           </label>
           <label>
             <span id="adminPasswordLabel">邮箱管理口令 / API Key</span>
-            <small id="adminPasswordHint">LuckMail 填 X-API-Key；DuckMail 填管理口令或 API Key（公共实例可留空）。</small>
-            <input name="temp_mail_admin_password" placeholder="LuckMail X-API-Key / DuckMail dk_xxx">
+            <small id="adminPasswordHint">LuckMail 填 X-API-Key；DuckMail 私有域名填 API Key（格式 dk_xxx，从 domain.duckmail.sbs 获取）。</small>
+            <input name="temp_mail_admin_password" placeholder="LuckMail: X-API-Key / DuckMail 私有域名: dk_xxx">
           </label>
           <label>
             <span>站点密码</span>
