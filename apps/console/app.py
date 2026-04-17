@@ -254,6 +254,9 @@ def run_health_checks() -> dict[str, Any]:
         temp_mail_api_base = "https://mails.luckyous.com"
     elif not temp_mail_api_base and temp_mail_provider == "duckmail":
         temp_mail_api_base = "https://api.duckmail.sbs"
+    # 自动补全 scheme，防止用户填写时漏写 https://
+    if temp_mail_api_base and not temp_mail_api_base.startswith(("http://", "https://")):
+        temp_mail_api_base = "https://" + temp_mail_api_base
 
     warp_target = browser_proxy or request_proxy
     if not warp_target:
@@ -341,7 +344,52 @@ def run_health_checks() -> dict[str, Any]:
                 )
             )
 
-    if not temp_mail_api_base:
+    # DuckMail: api_base 存的是私有邮件域名（仅 MX 记录，无 HTTP 服务）
+    # 健康检查应访问 DuckMail 官方 API，而非私有邮件域名
+    _duckmail_api_url = "https://api.duckmail.sbs"
+    temp_mail_admin_password = str(defaults.get("temp_mail_admin_password", "") or "").strip()
+    if temp_mail_provider == "duckmail":
+        _check_url = _duckmail_api_url + "/domains"
+        _check_headers = {"Authorization": f"Bearer {temp_mail_admin_password}"} if temp_mail_admin_password else {}
+        _private_domain = temp_mail_api_base or "未配置"
+        _target_label = f"{_private_domain} (私有域名, API via {_duckmail_api_url})"
+        try:
+            response = _request_with_optional_proxy(
+                _check_url,
+                proxy_url=request_proxy,
+                timeout=15,
+                headers=_check_headers,
+            )
+            ok = response.status_code in {200, 401, 403}
+            status_desc = f"HTTP {response.status_code}"
+            if response.status_code == 200:
+                detail_msg = f"DuckMail API 连通正常，私有域名 `{_private_domain}` 用于接收注册验证码。"
+            elif response.status_code == 401:
+                detail_msg = "DuckMail API 可达，但 API Key 无效或未配置，请检查 temp_mail_admin_password。"
+            else:
+                detail_msg = f"DuckMail API 返回 HTTP {response.status_code}。"
+            items.append(
+                _build_health_item(
+                    "temp_mail",
+                    "Temp Mail API",
+                    ok,
+                    status_desc,
+                    detail_msg,
+                    _target_label,
+                )
+            )
+        except Exception as exc:
+            items.append(
+                _build_health_item(
+                    "temp_mail",
+                    "Temp Mail API",
+                    False,
+                    "接口不可达",
+                    f"访问 DuckMail API `{_duckmail_api_url}` 失败：{exc}",
+                    _duckmail_api_url,
+                )
+            )
+    elif not temp_mail_api_base:
         items.append(
             _build_health_item(
                 "temp_mail",

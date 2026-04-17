@@ -37,6 +37,9 @@ TEMP_MAIL_API_BASE = str(
     or _conf.get("duckmail_api_base")
     or ""
 )
+# 自动补全 scheme，防止用户填写时漏写 https://
+if TEMP_MAIL_API_BASE and not TEMP_MAIL_API_BASE.startswith(("http://", "https://")):
+    TEMP_MAIL_API_BASE = "https://" + TEMP_MAIL_API_BASE
 TEMP_MAIL_ADMIN_PASSWORD = str(
     _conf.get("temp_mail_admin_password")
     or _conf.get("duckmail_api_key")
